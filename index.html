@@ -3,110 +3,152 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>验证跳转中...</title>
-    <!-- 加载Turnstile SDK，移除async/defer避免加载时序问题 -->
-    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>
+    <title>安全验证</title>
+    <!-- 异步加载Turnstile SDK，避免阻塞页面 -->
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
         body {
             font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             display: flex;
             justify-content: center;
             align-items: center;
             height: 100vh;
-            margin: 0;
             background-color: #f7f7f7;
         }
-        .login-card {
+        .verify-card {
             background: white;
-            padding: 2rem;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            width: 350px;
+            padding: 2.5rem 2rem;
+            border-radius: 12px;
+            box-shadow: 0 6px 16px rgba(0,0,0,0.08);
+            width: 380px;
             text-align: center;
         }
-        h2 { margin-top: 0; color: #333; font-size: 1.25rem; }
-        .cf-turnstile {
-            margin-top: 1rem;
-            display: flex;
-            justify-content: center;
+        .verify-card h2 {
+            color: #2d3748;
+            font-size: 1.4rem;
+            margin-bottom: 0.8rem;
         }
-        .status-text {
-            margin-top: 15px;
+        .verify-card .desc {
+            color: #718096;
             font-size: 14px;
-            color: #666;
+            margin-bottom: 1.5rem;
+        }
+        /* 验证容器：初始隐藏，加载后显示 */
+        #turnstile-container {
+            margin: 1rem auto;
+            display: none;
         }
         #verify-btn {
-            margin-top: 1rem;
-            padding: 8px 24px;
-            background: #007bff;
+            padding: 10px 32px;
+            background: #2563eb;
             color: white;
             border: none;
-            border-radius: 4px;
+            border-radius: 6px;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 15px;
+            margin-top: 1rem;
+            transition: background 0.2s;
+            display: none; /* 初始隐藏，组件加载后显示 */
         }
         #verify-btn:hover {
-            background: #0056b3;
+            background: #1d4ed8;
         }
+        #verify-btn:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+        }
+        .status-text {
+            margin-top: 18px;
+            font-size: 14px;
+            color: #64748b;
+            min-height: 20px; /* 防止文字切换时布局跳动 */
+        }
+        .success { color: #16a34a; }
+        .error { color: #dc2626; }
+        .loading { color: #64748b; }
     </style>
 </head>
 <body>
 
-<div class="login-card">
+<div class="verify-card">
     <h2>安全验证</h2>
-    <p style="font-size: 14px; color: #888;">请点击下方按钮完成验证以继续访问</p>
-
-    <!-- 1. 禁用自动验证：data-auto="false" -->
-    <div id="turnstile-container" class="cf-turnstile" 
-         data-sitekey="0x4AAAAAACZ-_tzQekptoaJN" 
-         data-theme="light"
-         data-auto="false"  <!-- 核心：关闭自动验证 -->
-         data-callback="onSuccess"></div>
-
-    <!-- 2. 添加手动触发按钮 -->
-    <button id="verify-btn" style="display: none;">点击验证</button>
-
-    <div id="msg" class="status-text">等待验证...</div>
+    <p class="desc">请完成验证以继续访问</p>
+    
+    <!-- 仅保留空容器，由JS统一渲染验证组件 -->
+    <div id="turnstile-container"></div>
+    
+    <!-- 手动验证按钮 -->
+    <button id="verify-btn">点击完成验证</button>
+    
+    <!-- 状态提示 -->
+    <div id="status" class="status-text loading">等待验证组件加载...</div>
 </div>
 
 <script>
-    // 等待Turnstile SDK加载完成
-    window.onload = function() {
-        // 初始化Turnstile，手动控制验证流程
-        let widgetId;
-        try {
-            // 渲染验证组件（但不自动验证）
-            widgetId = turnstile.render('#turnstile-container', {
-                sitekey: '0x4AAAAAACZ-_tzQekptoaJN',
-                theme: 'light',
-                auto: false,  // 禁用自动验证
-                callback: onSuccess
-            });
+    let widgetId; // 存储验证组件ID
+    const statusEl = document.getElementById('status');
+    const btnEl = document.getElementById('verify-btn');
+    const containerEl = document.getElementById('turnstile-container');
 
-            // 显示手动验证按钮
-            document.getElementById('verify-btn').style.display = 'inline-block';
-            
-            // 3. 点击按钮时手动触发验证
-            document.getElementById('verify-btn').addEventListener('click', function() {
-                document.getElementById('msg').innerHTML = '<span style="color: #666;">验证中...</span>';
-                // 手动启动验证流程
-                turnstile.execute(widgetId);
-            });
-        } catch (e) {
-            document.getElementById('msg').innerHTML = '<span style="color: #dc3545;">验证组件加载失败：' + e.message + '</span>';
-        }
-    };
-
-    // 验证成功后调用的函数
-    function onSuccess(token) {
-        document.getElementById('msg').innerHTML = '<span style="color: #28a745;">验证成功！正在跳转...</span>';
-        document.getElementById('verify-btn').disabled = true; // 禁用按钮
+    // 验证成功回调
+    function onVerifySuccess(token) {
+        statusEl.className = 'status-text success';
+        statusEl.textContent = '验证成功！正在跳转...';
+        btnEl.disabled = true;
         
-        // 延迟 500ms 跳转
-        setTimeout(function() {
+        // 延迟跳转
+        setTimeout(() => {
             window.location.href = "https://zengyige7760.github.io";
-        }, 500);
+        }, 800);
     }
+
+    // 页面加载完成后初始化
+    window.addEventListener('DOMContentLoaded', () => {
+        // 等待Turnstile SDK加载完成
+        const checkTurnstileLoaded = setInterval(() => {
+            if (window.turnstile) {
+                clearInterval(checkTurnstileLoaded);
+                try {
+                    // 仅通过JS渲染一次验证组件（核心：避免重复）
+                    widgetId = turnstile.render(containerEl, {
+                        sitekey: '0x4AAAAAACZ-_tzQekptoaJN',
+                        theme: 'light',
+                        auto: false, // 禁用自动验证
+                        callback: onVerifySuccess,
+                        // 验证失败回调（可选）
+                        'error-callback': (error) => {
+                            statusEl.className = 'status-text error';
+                            statusEl.textContent = `验证失败：${error.message}`;
+                        }
+                    });
+
+                    // 显示验证容器和按钮
+                    containerEl.style.display = 'block';
+                    btnEl.style.display = 'inline-block';
+                    statusEl.className = 'status-text loading';
+                    statusEl.textContent = '请点击按钮完成验证';
+
+                    // 点击按钮手动触发验证
+                    btnEl.addEventListener('click', () => {
+                        statusEl.className = 'status-text loading';
+                        statusEl.textContent = '验证中，请稍候...';
+                        // 执行验证（仅触发一次，避免重复点击）
+                        if (!btnEl.disabled) {
+                            turnstile.execute(widgetId);
+                        }
+                    });
+                } catch (e) {
+                    statusEl.className = 'status-text error';
+                    statusEl.textContent = `组件加载失败：${e.message}`;
+                }
+            }
+        }, 100); // 轮询检查SDK是否加载完成
+    });
 </script>
 
 </body>
